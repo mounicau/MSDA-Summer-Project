@@ -85,24 +85,65 @@ wine_text = subset(wine_text, select = -c(description))
 ```
 
 ```{r}
-test = wine_text[1:10,]
+## test data set
+# test = wine_text[1:10,]
+
+
+##get number of words per wine description 
+# test$word_count = str_count(test$description_clean, pattern = "\\W+")
+# 
+# #creating corpus | turning records into documents
+# text_corpus = Corpus(VectorSource(test$description_clean))
+# #printing first 3 documents (reviews)
+# #inspect(text_corpus[1:3])   
+# 
+# text_corpus = tm_map(text_corpus, removeNumbers)
+# text_corpus = tm_map(text_corpus, removePunctuation)
+# text_corpus = tm_map(text_corpus,removeWords, stopwords("english"))
+# text_corpus = tm_map(text_corpus, stripWhitespace)
+# 
+# inspect(text_corpus[1:2])
+
+```
+
+```{r}
+full_corpus = wine_text
 
 #get number of words per wine description 
-test$word_count = str_count(test$description_clean, pattern = "\\W+")
+full_corpus$word_count = str_count(full_corpus$description_clean, pattern = "\\W+")
 
 #creating corpus | turning records into documents
-text_corpus = Corpus(VectorSource(test$description_clean))
+text_corpus = Corpus(VectorSource(full_corpus$description_clean))
 #printing first 3 documents (reviews)
 #inspect(text_corpus[1:3])   
 
 text_corpus = tm_map(text_corpus, removeNumbers)
 text_corpus = tm_map(text_corpus, removePunctuation)
-text_corpus = tm_map(text_corpus,removeWords, stopwords("english"))
+text_corpus = tm_map(text_corpus, removeWords, stopwords("english"))
+
+#####################INSERT CODE ABOUT FINDING MOST FREQUENT TERMS#######################################
+
+text_corpus = tm_map(text_corpus, removeWords, c("wine","drink","now", "flavor", "palate", "finish", "notes", "nose", "soft", "offers", "texture", "shows", "well", "good", "touch", "character", "will", "made", "also", "just", "notes", "like", "hint", "fine", "bit", "long", "still", "give", "mouth", "there", "theres", "opens", "age", "along", "alongside", "style"))
+
+#gsub(pattern = "\\b[a-z]\\b{1}", replace = "", text_corpus)
+
 text_corpus = tm_map(text_corpus, stripWhitespace)
 
-inspect(text_corpus[1:2])
+#inspect(text_corpus[1:2])
+```
 
+```{r}
+#sentiment analysis
 
+pos_words = scan("positive_words.txt", what="character", comment.char = ";")
+neg_words = scan("negative_words.txt", what="character", comment.char = ";")
+
+tokenized_words = tokenize_words(full_corpus$description_clean)
+
+wine_text$pos_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,pos_words)))}))
+wine_text$neg_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,neg_words)))}))
+
+wine_text$sentiment_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,pos_words))) - sum(!is.na(match(x,neg_words)))}))
 ```
 
 ```{r}
@@ -115,8 +156,6 @@ wine_text$fruits[wine_text$fruits_find==TRUE] = 1 #when true will print 1
 wine_text = subset(wine_text, select = -c(fruits_find))
 
 sum(wine_text$fruits) #count of records with friut in the description 
-
-#tannins = c('acidity','tannins','tannic','tart','dry','bitter','balance','structure','complex')
 
 tannins = c('acidity','tannins','tannic','tart','dry','bitter','balance','structure','complex','acid','astringent','caustic','cutting','dry','sharp','short','wounding','acerb','acerbic','acetose','acidulous','acrimonious','barbed','biting','harsh','nasty','piquant','pungent','scathing','snappish','snappy','snippy','tangy','testy','trenchant','vinegary')
 
@@ -168,10 +207,29 @@ ngram_tokenizer <- function(n = 1L, skip_word_none = TRUE) {
 
 ```{r}
 #joing and trim fields 
-wine = sqldf("select a.id, a.wood, a.fruits, a.tannin, b.age, b.country, b.region, b.variety, b.color, b.province, b.winery, b.title from wine_text a inner join wine_reviews b on (a.id = b.id)")
+# typeof(wine_text)
+wine_text = as.data.frame(wine_text)
+wine = sqldf("select 
+                a.id, 
+                a.wood, 
+                a.fruits, 
+                a.tannin, 
+                a.pos_score, 
+                a.neg_score, 
+                a.sentiment_score, 
+                b.age, 
+                b.country, 
+                b.region, 
+                b.variety, 
+                b.color, 
+                b.province, 
+                b.winery, 
+                b.title 
+             from wine_text a 
+             inner join wine_reviews b 
+             on (a.id = b.id)")
 ```
 
-
-
-
-
+```{r}
+wordcloud(text_corpus, random.order = FALSE, colors = rainbow(4), max.words = 150)
+```
