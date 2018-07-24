@@ -157,8 +157,6 @@ wine_text = subset(wine_text, select = -c(fruits_find))
 
 sum(wine_text$fruits) #count of records with friut in the description 
 
-#tannins = c('acidity','tannins','tannic','tart','dry','bitter','balance','structure','complex')
-
 tannins = c('acidity','tannins','tannic','tart','dry','bitter','balance','structure','complex','acid','astringent','caustic','cutting','dry','sharp','short','wounding','acerb','acerbic','acetose','acidulous','acrimonious','barbed','biting','harsh','nasty','piquant','pungent','scathing','snappish','snappy','snippy','tangy','testy','trenchant','vinegary')
 
 wine_text$tannins_find = sapply(wine_text$description_clean, function(x) any(sapply(tannins, str_detect, string = x)))
