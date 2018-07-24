@@ -1,6 +1,6 @@
 ---
 title: "Data Preprocessing"
-author: "Urity, Mounica"
+author: "Urity, Mounica and Reyes, Jacob"
 date: "July 12, 2018"
 output: word_document
 ---
@@ -11,14 +11,22 @@ library(stringr)
 library(sqldf)
 library(tm)
 library(tidytext)
-#library(qdap)
+library(dplyr)
+library(caret)
+library(ngram)
+library(qdap)
+library(corrplot)
 ```
 
 ```{r}
 #load dataset
 wd = getwd()
 file = paste(wd,"winemag_data_130k_v2.csv",sep="/")
+file2 = paste(wd, "Wine varities.csv", sep="/")
+
 wine_reviews = read.csv(file, head=TRUE, encoding="UTF-8",stringsAsFactors = FALSE)
+wine_varities = read.csv(file2, header = TRUE, stringsAsFactors = FALSE)
+
 #head(wine_reviews)
 #summary(wine_reviews)
 ```
@@ -27,23 +35,34 @@ wine_reviews = read.csv(file, head=TRUE, encoding="UTF-8",stringsAsFactors = FAL
 #remove first column (an ID)
 wine_reviews = wine_reviews[-1]
 
+#removing wines varities that occur less than 500 times (dropping about 20k records)
+wine_reviews = sqldf("select a.*, b.color from wine_reviews a inner join wine_varities b on (a.variety = b.variety)")
+
 #count of region_2 = 50512 and a lot of time region_2 is the same as region_1 therefore, remove region_2
-wine_reviews = wine_reviews[-8]
-#remove twitter handle... do we need taster name?
-wine_reviews = wine_reviews[-9]
+#remove twitter handle and taster name
+wine_reviews = wine_reviews[-c(8:10)] #need to check that the index is still 8 after removing id 
 
 wine_reviews$title_clean = gsub('1912 Winemakers', "", wine_reviews$title)
 wine_reviews$title_clean = gsub('Poderi dal Nespoli 1929', "", wine_reviews$title_clean)
 wine_reviews$title_clean = gsub('Guidi 1929', "", wine_reviews$title_clean)
+wine_reviews$title_clean = gsub('-', " ", wine_reviews$title_clean)
 
 #parse out year (vintage)from wine description 
 wine_reviews$vintage = as.numeric(str_extract(wine_reviews$title_clean,"(?:19|20)+[0-9]{2}"))
 
+#creating age variable 
+wine_reviews$age = (2018 - wine_reviews$vintage)
+
+#removing vintage
+wine_reviews = subset(wine_reviews, select = -c(vintage))
+
+#removing title clean field
 wine_reviews = subset(wine_reviews, select = -c(title_clean))
 
 #replace region_1 with the region in the title column listed in ()
 region_1 = str_extract(wine_reviews$title,"(?:\\()+(\\w+\\s*)+")
 wine_reviews$region = str_extract(region_1, regex("(\\w)+(\\s)*(\\w)*(\\s)*(\\w)*", ignore_case = TRUE))
+
 #head(wine_reviews)
 wine_reviews = wine_reviews[-7]
 ```
@@ -66,29 +85,153 @@ wine_text = subset(wine_text, select = -c(description))
 ```
 
 ```{r}
-test = wine_text[1:10,]
+## test data set
+# test = wine_text[1:10,]
+
+
+##get number of words per wine description 
+# test$word_count = str_count(test$description_clean, pattern = "\\W+")
+# 
+# #creating corpus | turning records into documents
+# text_corpus = Corpus(VectorSource(test$description_clean))
+# #printing first 3 documents (reviews)
+# #inspect(text_corpus[1:3])   
+# 
+# text_corpus = tm_map(text_corpus, removeNumbers)
+# text_corpus = tm_map(text_corpus, removePunctuation)
+# text_corpus = tm_map(text_corpus,removeWords, stopwords("english"))
+# text_corpus = tm_map(text_corpus, stripWhitespace)
+# 
+# inspect(text_corpus[1:2])
+
+```
+
+```{r}
+full_corpus = wine_text
 
 #get number of words per wine description 
-test$word_count = str_count(test$description_clean, pattern = "\\W+")
+full_corpus$word_count = str_count(full_corpus$description_clean, pattern = "\\W+")
 
 #creating corpus | turning records into documents
-text_corpus = Corpus(VectorSource(test$description_clean))
+text_corpus = Corpus(VectorSource(full_corpus$description_clean))
 #printing first 3 documents (reviews)
 #inspect(text_corpus[1:3])   
 
 text_corpus = tm_map(text_corpus, removeNumbers)
 text_corpus = tm_map(text_corpus, removePunctuation)
-text_corpus = tm_map(text_corpus,removeWords, stopwords("english"))
+text_corpus = tm_map(text_corpus, removeWords, stopwords("english"))
+
+#####################INSERT CODE ABOUT FINDING MOST FREQUENT TERMS#######################################
+
+text_corpus = tm_map(text_corpus, removeWords, c("wine","drink","now", "flavor", "palate", "finish", "notes", "nose", "soft", "offers", "texture", "shows", "well", "good", "touch", "character", "will", "made", "also", "just", "notes", "like", "hint", "fine", "bit", "long", "still", "give", "mouth", "there", "theres", "opens", "age", "along", "alongside", "style"))
+
+#gsub(pattern = "\\b[a-z]\\b{1}", replace = "", text_corpus)
+
 text_corpus = tm_map(text_corpus, stripWhitespace)
 
-inspect(text_corpus[1:2])
-
-
+#inspect(text_corpus[1:2])
 ```
 
+```{r}
+#sentiment analysis
+
+pos_words = scan("positive_words.txt", what="character", comment.char = ";")
+neg_words = scan("negative_words.txt", what="character", comment.char = ";")
+
+tokenized_words = tokenize_words(full_corpus$description_clean)
+
+wine_text$pos_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,pos_words)))}))
+wine_text$neg_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,neg_words)))}))
+
+wine_text$sentiment_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,pos_words))) - sum(!is.na(match(x,neg_words)))}))
+```
+
+```{r}
+#creating list of fruits to extract feature from text field 
+fruits = c('fruit','apple','akee','apricot','avocado','banana','bilberry','blackberry','blackcurrant','black sapote','blueberry','boysenberry','crab apples','currant','cherry','cherimoya','chico fruit','cloudberry','coconut','cranberry','cucumber','damson','date','dragonfruitt','pitaya','durian','elderberry','feijoa','fig','goji berry','gooseberry','grape','raisin','grapefruit','guava','honeyberry','huckleberry','jabuticaba','jackfruit','jambul','japanese plum','jostaberry','jujube','juniper berry','kiwano','horned melon','kiwifruit','kumquat','lemon','lime','loquat','longan','lychee','mango','mangosteen','marionberry','melon','cantaloupe','honeydew','watermelon','miracle fruit','mulberry','nectarine','nance','olive','orange','blood orange','clementine','mandarine','tangerine','papaya','passionfruit','peach','pear','persimmon','plantain','plum','prune','dried plum','pineapple','pineberry','plumcot','pluot','pomegranate','pomelo','purple mangosteen','quince','raspberry','salmonberry','rambutan','mamin chino','redcurrant','salal berry','salak','satsuma','soursop','star apple','star fruit','strawberry','surinam cherry','tamarillo','tamarind','ugli fruit','yuzu','white currant','white sapote') 
+
+wine_text$fruits_find = sapply(wine_text$description_clean, function(x) any(sapply(fruits, str_detect, string = x)))
+wine_text$fruits = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$fruits[wine_text$fruits_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(fruits_find))
+
+sum(wine_text$fruits) #count of records with friut in the description 
+
+#tannins = c('acidity','tannins','tannic','tart','dry','bitter','balance','structure','complex')
+
+tannins = c('acidity','tannins','tannic','tart','dry','bitter','balance','structure','complex','acid','astringent','caustic','cutting','dry','sharp','short','wounding','acerb','acerbic','acetose','acidulous','acrimonious','barbed','biting','harsh','nasty','piquant','pungent','scathing','snappish','snappy','snippy','tangy','testy','trenchant','vinegary')
+
+wine_text$tannins_find = sapply(wine_text$description_clean, function(x) any(sapply(tannins, str_detect, string = x)))
+wine_text$tannin = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$tannin[wine_text$tannins_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(tannins_find))
+
+sum(wine_text$tannin)
 
 
+woods =c('larch','chip','cedar','mapple','redwood','red oak','oak','ash','alder','cherry','pine','mahogany','walnut')
 
+wine_text$wood_find = sapply(wine_text$description_clean, function(x) any(sapply(woods, str_detect, string = x)))
+wine_text$wood = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$wood[wine_text$wood_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(wood_find))
 
+sum(wine_text$wood)
+```
 
+```{r}
+#' Ngrams tokenizer
+#' @param n integer
+#' @return n-gram tokenizer function
+ngram_tokenizer <- function(n = 1L, skip_word_none = TRUE) {
+  stopifnot(is.numeric(n), is.finite(n), n > 0)
+  options <- stringi::stri_opts_brkiter(type="word", skip_word_none = skip_word_none)
+  
+  function(x) {
+    stopifnot(is.character(x))
+    
+    # Split into word tokens
+    tokens <- unlist(stringi::stri_split_boundaries(x, opts_brkiter=options))
+    len <- length(tokens)
+    
+    if(all(is.na(tokens)) || len < n) {
+      # If we didn't detect any words or number of tokens is less than n return empty vector
+      character(0)
+    } else {
+      sapply(
+        1:max(1, len - n + 1),
+        function(i) stringi::stri_join(tokens[i:min(len, i + n - 1)], collapse = " ")
+      )
+    }
+  }
+}
+```
 
+```{r}
+#joing and trim fields 
+# typeof(wine_text)
+wine_text = as.data.frame(wine_text)
+wine = sqldf("select 
+                a.id, 
+                a.wood, 
+                a.fruits, 
+                a.tannin, 
+                a.pos_score, 
+                a.neg_score, 
+                a.sentiment_score, 
+                b.age, 
+                b.country, 
+                b.region, 
+                b.variety, 
+                b.color, 
+                b.province, 
+                b.winery, 
+                b.title 
+             from wine_text a 
+             inner join wine_reviews b 
+             on (a.id = b.id)")
+```
+
+```{r}
+wordcloud(text_corpus, random.order = FALSE, colors = rainbow(4), max.words = 150)
+```
