@@ -324,12 +324,12 @@ ctrl = trainControl(method = "repeatedcv", number = 5, repeats = 10)
 ```
 
 ```{r}
-mode_clust = kmodes(na.omit(train_x[-c(8:9)]),4,iter.max = 10,weighted=FALSE, fast=TRUE)
+mode_clust = kmodes(na.omit(train_x[-c(8:9)]),3,iter.max = 10,weighted=FALSE, fast=TRUE)
 mode_clust$withindiff
 ```
 
 ```{r}
-comb_clust = kproto(train_x,4,iter.max=10)
+comb_clust = kproto(train_x,3,iter.max=10)
 comb_clust #within cluster error is very large.. prob not a good measurement
 #will need to press enter a couple times after running the code.... R is waiting for user input
 clprofiles(comb_clust, train_x)
