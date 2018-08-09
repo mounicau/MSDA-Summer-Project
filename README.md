@@ -5,6 +5,8 @@ We are trying to predict how well a wine is rated based on features extracted fr
 
 Files Attached:
 
+-DA6813 - Team 11 - Final Project Code.rmd (final cleaned version of code)
+
 -winemag_data_130k_v2.csv (sample of original Kaggle dataset found at https://www.kaggle.com/zynicide/wine-reviews)
 
 -wine_new.csv (sample of cleaned dataset)
