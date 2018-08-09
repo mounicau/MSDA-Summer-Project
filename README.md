@@ -13,6 +13,8 @@ Files Attached:
 
 -negative_words.txt (dictionary used for sentiment analysis)
 
+-frequent_terms_500.csv (used to help identify features of interest)
+
 Sources:
 
 -original Kaggle dataset found at https://www.kaggle.com/zynicide/wine-reviews
