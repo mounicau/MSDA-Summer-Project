@@ -1,0 +1,480 @@
+---
+title: "Summer Project"
+author: "Jacob Reyes & Mounica Urity"
+date: "July 23, 2018"
+output: word_document
+---
+
+```{r}
+#load libraries
+library(stringr)
+library(sqldf)
+library(tm)
+library(tidytext)
+library(dplyr)
+library(caret)
+library(ngram)
+library(qdap)
+library(corrplot)
+library(tokenizers)
+library(wordcloud)
+library(caret)
+library(randomForest)
+library(klaR) #kmodes clustering
+library(clustMixType) #kproto clustering
+library(caret)
+library(nnet) #neural network classification
+```
+
+```{r}
+#load dataset
+wd = getwd()
+file = paste(wd,"winemag_data_130k_v2.csv",sep="/")
+file2 = paste(wd, "Wine varities.csv", sep="/")
+
+wine_reviews = read.csv(file, head=TRUE, encoding="UTF-8",stringsAsFactors = FALSE)
+wine_varities = read.csv(file2, header = TRUE, stringsAsFactors = FALSE)
+```
+
+```{r}
+#remove first column (an ID)
+wine_reviews = wine_reviews[-1]
+
+#removing wines varities that occur less than 500 times (dropping about 20k records)
+wine_reviews = sqldf("select a.*, b.color from wine_reviews a inner join wine_varities b on (a.variety = b.variety)")
+
+#count of region_2 = 50512 and a lot of time region_2 is the same as region_1 therefore, remove region_2
+#remove twitter handle and taster name
+wine_reviews = wine_reviews[-c(7:10)] 
+
+wine_reviews$title_clean = gsub('1912 Winemakers', "", wine_reviews$title)
+wine_reviews$title_clean = gsub('Poderi dal Nespoli 1929', "", wine_reviews$title_clean)
+wine_reviews$title_clean = gsub('Guidi 1929', "", wine_reviews$title_clean)
+wine_reviews$title_clean = gsub('-', " ", wine_reviews$title_clean)
+
+#parse out year (vintage) from wine description 
+wine_reviews$vintage = as.numeric(str_extract(wine_reviews$title_clean,"(?:19|20)+[0-9]{2}"))
+
+#creating age variable 
+wine_reviews$age = (2018 - wine_reviews$vintage)
+
+#removing vintage
+wine_reviews = subset(wine_reviews, select = -c(vintage))
+
+#removing title clean field
+wine_reviews = subset(wine_reviews, select = -c(title_clean))
+
+#replace region_1 with the region in the title column listed in ()
+region_1 = str_extract(wine_reviews$title,"(?:\\()+(\\w+\\s*)+")
+wine_reviews$region = str_extract(region_1, regex("(\\w)+(\\s)*(\\w)*(\\s)*(\\w)*", ignore_case = TRUE))
+
+head(wine_reviews)
+```
+
+```{r}
+#creating unique identifier for each record (this is to join back after processing)
+wine_reviews$id = (1:nrow(wine_reviews))
+
+#creating df for text processing 
+wine_text = wine_reviews[,c("id","description")]
+
+#converting to lower case
+wine_text$description_clean = tolower(wine_text$description)
+
+#removing original description field to only keep id and cleaned description 
+wine_text = subset(wine_text, select = -c(description))
+```
+
+```{r}
+full_corpus = wine_text
+
+# get number of words per wine description 
+full_corpus$word_count = str_count(full_corpus$description_clean, pattern = "\\W+")
+
+#creating corpus | turning records into documents
+text_corpus = Corpus(VectorSource(full_corpus$description_clean))
+# printing first 3 documents (reviews)
+#inspect(text_corpus[1:3])   
+
+text_corpus = tm_map(text_corpus, removeNumbers)
+text_corpus = tm_map(text_corpus, removePunctuation)
+text_corpus = tm_map(text_corpus, removeWords, stopwords("english"))
+
+frequent_terms = freq_terms(wine_text$description_clean, top = 500)
+
+# write.csv(frequent_terms, 'frequent_terms_500.csv')
+
+text_corpus = tm_map(text_corpus, removeWords, c("wine","drink","now", "flavor", "palate", "finish", "notes", "nose", "soft", "offers", "texture", "shows", "well", "good", "touch", "character", "will", "made", "also", "just", "notes", "like", "hint", "fine", "bit", "long", "still", "give", "mouth", "there", "theres", "opens", "age", "along", "alongside", "style"))
+
+text_corpus = tm_map(text_corpus, stripWhitespace)
+
+# inspect(text_corpus[1:2])
+```
+
+```{r}
+#sentiment analysis
+# read in text files about pre-built positive and negative word dictionaries
+pos_words = scan("positive_words.txt", what="character", comment.char = ";")
+neg_words = scan("negative_words.txt", what="character", comment.char = ";")
+
+tokenized_words = tokenize_words(full_corpus$description_clean)
+
+wine_text$pos_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,pos_words)))}))
+wine_text$neg_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,neg_words)))}))
+
+wine_text$sentiment_score = as.numeric(lapply(tokenized_words,function(x){sum(!is.na(match(x,pos_words))) - sum(!is.na(match(x,neg_words)))}))
+```
+
+```{r}
+#creating list of fruits to extract feature from text field 
+fruits = c('fruit','apple','akee','apricot','avocado','banana','bilberry','blackberry','blackcurrant','black sapote','blueberry','boysenberry','crab apples','currant','cherry','cherimoya','chico fruit','cloudberry','coconut','cranberry','cucumber','damson','date','dragonfruitt','pitaya','durian','elderberry','feijoa','fig','goji berry','gooseberry','grape','raisin','grapefruit','guava','honeyberry','huckleberry','jabuticaba','jackfruit','jambul','japanese plum','jostaberry','jujube','juniper berry','kiwano','horned melon','kiwifruit','kumquat','lemon','lime','loquat','longan','lychee','mango','mangosteen','marionberry','melon','cantaloupe','honeydew','watermelon','miracle fruit','mulberry','nectarine','nance','olive','orange','blood orange','clementine','mandarine','tangerine','papaya','passionfruit','peach','pear','persimmon','plantain','plum','prune','dried plum','pineapple','pineberry','plumcot','pluot','pomegranate','pomelo','purple mangosteen','quince','raspberry','salmonberry','rambutan','mamin chino','redcurrant','salal berry','salak','satsuma','soursop','star apple','star fruit','strawberry','surinam cherry','tamarillo','tamarind','ugli fruit','yuzu','white currant','white sapote') 
+
+wine_text$fruits_find = sapply(wine_text$description_clean, function(x) any(sapply(fruits, str_detect, string = x)))
+wine_text$fruits = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$fruits[wine_text$fruits_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(fruits_find))
+
+sum(wine_text$fruits) #count of records with friut in the description 
+
+#dictionary for tannins
+tannins = c('acidity','tannins','tannic','tart','dry','bitter','balance','structure','complex','acid','astringent','caustic','cutting','dry','sharp','short','wounding','acerb','acerbic','acetose','acidulous','acrimonious','barbed','biting','harsh','nasty','piquant','pungent','scathing','snappish','snappy','snippy','tangy','testy','trenchant','vinegary')
+
+wine_text$tannins_find = sapply(wine_text$description_clean, function(x) any(sapply(tannins, str_detect, string = x)))
+wine_text$tannin = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$tannin[wine_text$tannins_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(tannins_find))
+
+sum(wine_text$tannin)
+
+#dictionary for wood
+woods =c('larch','chip','cedar','mapple','redwood','red oak','oak','ash','alder','cherry','pine','mahogany','walnut')
+
+wine_text$wood_find = sapply(wine_text$description_clean, function(x) any(sapply(woods, str_detect, string = x)))
+wine_text$wood = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$wood[wine_text$wood_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(wood_find))
+
+sum(wine_text$wood)
+
+#dictionary for sweet
+sweet = c('sweet','delicious','luscious','sweetened','syrupy','candied','candy-coated','cloying','honeyed','candy','honey','nectarous','sacchariferous','saccharine','sugar','sugared','toothsome', 'chocolate','dessert', 'coco', 'cocoa')
+
+wine_text$sweet_find = sapply(wine_text$description_clean, function(x) any(sapply(sweet, str_detect, string = x)))
+wine_text$sweet = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$sweet[wine_text$sweet_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(sweet_find))
+
+sum(wine_text$sweet)
+
+#dictionary for spice
+spice = c('spice','tobacco','aromatic','distinctive','fiery','fresh','hot','peppery','piquant','seasoned','tangy','tasty','zesty','ambrosial','aromal','flavorsome','herbaceous','keen','odoriferous','perfumed','poignant','racy','redolent','scented','snappy','spirited','zippy')
+
+wine_text$spice_find = sapply(wine_text$description_clean, function(x) any(sapply(spice, str_detect, string = x)))
+wine_text$spice = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$spice[wine_text$spice_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(spice_find))
+
+sum(wine_text$spice)
+
+#dictionary for heavy
+heavy = c('heavy', 'heavy bod','abundant','big','bulky','considerable','cumbersome','excessive','hefty','huge','large','massive','substantial','unwieldy','weighty','gross','lumbering','overweight','stout','ample','built','chunky','copious','corpulent','cumbrous','elephantine','enceinte','expectant','fleshy','gravid','laden','loaded','oppressed','parturient','ponderous','porcine','portly','top heavy','two ton','unmanageable','weighted','zaftig')
+
+wine_text$heavy_find = sapply(wine_text$description_clean, function(x) any(sapply(heavy, str_detect, string = x)))
+wine_text$heavy = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$heavy[wine_text$heavy_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(heavy_find))
+
+sum(wine_text$heavy)
+
+#dictionary for light
+light = c('light', 'light bod','agile','airy','buoyant','delicate','easy','fluffy','lightweight','loose','slender','slight','small','thin','dainty','featherweight','flimsy','floating','little','petty','portable','sheer','trifling','atmospheric','crumbly','downy','effervescent','ethereal','feathery','filmy','floatable','friable','frothy','gossamery','graceful','imponderous','inconsequential','insubstantial','lithe','meager','nimble','porous','sandy','spongy','sprightly','sylphlike','tissuelike','trivial','unheavy','unsubstantial','weightless')
+
+wine_text$light_find = sapply(wine_text$description_clean, function(x) any(sapply(light, str_detect, string = x)))
+wine_text$light = as.numeric(rep(0,nrow(wine_text))) #initializing a column with values of 0 for all records
+wine_text$light[wine_text$light_find==TRUE] = 1 #when true will print 1
+wine_text = subset(wine_text, select = -c(light_find))
+
+sum(wine_text$light)
+
+# write.csv(wine_text, 'wine_text.csv')
+```
+
+
+
+```{r}
+#join and trim fields 
+wine_text = as.data.frame(wine_text)
+wine = sqldf("select 
+                a.id, 
+                a.wood, 
+                a.fruits, 
+                a.tannin, 
+                a.spice,
+                a.sweet,
+                a.heavy,
+                a.light,
+                a.pos_score, 
+                a.neg_score, 
+                a.sentiment_score, 
+                case when a.sentiment_score > 0 then 'positive'
+                     when a.sentiment_score = 0 then 'nuetral'
+                     when a.sentiment_score < 0 then 'negative'
+                     else '' end as sentiment,
+                b.points,
+                case case when b.points between 80 and 85 then '80-85'
+                          when b.points between 86 and 90 then '86-90'
+                          when b.points between 91 and 100 then '91-100'
+                     else '' end as points_bin,
+                b.age, 
+                b.country, 
+                b.region, 
+                b.variety, 
+                b.color, 
+                b.province, 
+                b.winery, 
+                b.title 
+             from wine_text a 
+             inner join wine_reviews b 
+             on (a.id = b.id)")
+
+# write.csv(wine, 'wine_new.csv')
+```
+
+```{r}
+#read preprocessed file
+wd = getwd()
+file = paste(wd,"wine_new.csv",sep="/")
+wine = read.csv(file, head=TRUE, encoding = "UTF-8", stringsAsFactors = TRUE)
+```
+
+```{r}
+head(wine,2)
+summary(wine)
+
+#change binary and categorical variables to factors
+wine$wood = as.factor(wine$wood)
+wine$fruits = as.factor(wine$fruits)
+wine$tannin = as.factor(wine$tannin)
+wine$spice = as.factor(wine$spice)
+wine$heavy = as.factor(wine$heavy)
+wine$light = as.factor(wine$light)
+wine$points_bin = as.factor(wine$points_bin)
+
+#checking to see what the distributions of data look like
+plot(wine$country) 
+plot(wine$province)
+hist(wine$points)
+boxplot(wine$age)
+plot(wine$points_bin)
+
+#remove id, sentiment_score, sentiment, points, age, variety, province, winery, title
+wine_subset = wine[-c(23, 22, 21, 19, 16, 14, 13, 12, 2, 1)]
+```
+
+```{r}
+#region has approx 9 thousand nulls... imputing region by using the most common region in each country
+most_freq_regions = sqldf("
+      select max(num) as region_cnt, country, region
+      from(
+        select country, region, count(region) as num
+        from wine_subset
+        group by country, region
+        order by country, num desc)
+      group by country
+      ")
+
+as.data.frame(most_freq_regions)
+
+wine2 = sqldf("
+              select wine_subset.*, case when wine_subset.region is null then most_freq_regions.region else wine_subset.region end as region_imp
+              from wine_subset
+              left join most_freq_regions
+              on wine_subset.country = most_freq_regions.country
+              ")
+
+#remove original region column
+wine2 = wine2[-12]
+```
+
+
+```{r}
+#move points_bin to the start of the data frame
+col_idx = grep("points_bin", names(wine2))
+wine3 = wine2[, c(col_idx, (1:ncol(wine2))[-col_idx])]
+
+#split predictors and response
+x = wine3[-1]
+y = as.data.frame(wine3[1])
+y$points_bin = as.factor(y$points_bin)
+
+#split into test and train where the response variable is points_bin
+set.seed(123)
+index = createDataPartition(wine3$points_bin, p = 0.75, list = FALSE)
+
+train_x = x[index,]
+train_y = as.data.frame(y[index,])
+
+test_xy = wine3[-index,]
+
+test_x = x[-index,]
+test_y = as.data.frame(y[-index,])
+
+#creating the train control
+ctrl = trainControl(method = "repeatedcv", number = 5, repeats = 10)
+```
+
+```{r}
+mode_clust = kmodes(na.omit(train_x[-c(8:9)]),4,iter.max = 10,weighted=FALSE, fast=TRUE)
+mode_clust$withindiff
+```
+
+```{r}
+comb_clust = kproto(train_x,4,iter.max=10)
+comb_clust #within cluster error is very large.. prob not a good measurement
+#will need to press enter a couple times after running the code.... R is waiting for user input
+clprofiles(comb_clust, train_x)
+```
+
+```{r}
+summary(comb_clust)
+```
+
+
+```{r}
+downsampled_train = downSample(x = train_x[,1:13], y = train_y[,1], yname = "points_bin" )
+
+#remove country and region_imp for neural network
+downsampled_train_nn = downsampled_train[-c(13,10)]
+```
+
+
+```{r}
+nueral_net = train(x = downsampled_train_nn[,1:11], y = downsampled_train_nn[,12], method = "nnet", trControl = ctrl)
+nueral_net
+plot(nueral_net)
+
+predictions = predict(nueral_net, newdata = test_xy)
+
+table(test_xy$points_bin,predictions)
+```
+
+
+```{r}
+#Using Points as the Response Variable
+wine_cont = wine[-c(17:23)]
+wine_cont = wine_cont[-15]
+wine_cont = wine_cont[-13]
+wine_cont = wine_cont[-12]
+wine_cont = wine_cont[-c(1:2)]
+wine_cont = na.omit(wine_cont)
+
+#split into test and train where points is the response variable
+set.seed(123)
+index_cont = createDataPartition(wine_cont$points, p = 0.75, list = FALSE)
+
+train_cont = wine_cont[index_cont,]
+test_cont = wine_cont[-index_cont,]
+
+#using same train control as before
+```
+
+```{r}
+ols_lm = train(points~., data = wine_cont, method = "lm", trControl = ctrl)
+ols_lm
+```
+
+```{r}
+ols_lm_preproc = train(points~., data = wine_cont, method = "lm", preProc = c("center", "scale"), trControl = ctrl)
+ols_lm_preproc
+```
+
+```{r}
+ridge_lm = train(points~., data = wine_cont, method = "ridge", trControl = ctrl)
+ridge_lm
+```
+
+
+```{r}
+ridge_lm_preproc = train(points~., data = wine_cont, method = "ridge", preProc = c("center", "scale"), trControl = ctrl)
+ridge_lm_preproc
+```
+
+```{r}
+lasso_lm = train(points~., data = wine_cont, method = "lasso", trControl = ctrl)
+lasso_lm
+```
+
+
+```{r}
+lasso_lm_preproc = train(points~., data = wine_cont, method = "lasso", preProc = c("center", "scale"), trControl = ctrl)
+lasso_lm_preproc
+```
+
+```{r}
+#multinomial logistic regression
+caret.data = subset(wine,select = -c(id,sentiment,points,region,province,winery,title))
+
+caret.data$points_bin = as.factor(caret.data$points_bin)
+
+train_index = createDataPartition(caret.data$points_bin, p=.75, list=FALSE)
+train_data = caret.data[train_index,]
+test_data = caret.data[-train_index,]
+
+# Fit the model
+model = nnet::multinom(points_bin ~., data = train_data)
+
+# Make predictions
+predicted.classes = model %>% predict(test_data)
+head(predicted.classes)
+
+# Model accuracy
+accuracy = mean(predicted.classes == test_data$points_bin)
+
+glm.results = expand.grid(deviance=model$deviance,Accuracy=accuracy)
+```
+
+```{r}
+#random forest 
+rf.lm.data = subset(wine, select = -c(id,points_bin,country,variety,sentiment_score,sentiment,region,province,winery,title))
+
+rf.lm.data$color = as.factor(rf.lm.data$color)
+# summary(rf.lm.data)
+
+rf.lm.train_index = createDataPartition(rf.lm.data$points, p=.75, list=FALSE)
+rf.lm.train_data = rf.lm.data[rf.lm.train_index,]
+rf.lm.test_data = rf.lm.data[-rf.lm.train_index,]
+
+mtry = floor(sqrt(ncol(rf.lm.data))-1)
+
+rf.lm.train = randomForest(points~.,rf.lm.train_data,mtry=2,ntree=100)
+```
+
+```{r}
+#random forest classification 
+caret.data = subset(wine,select = -c(id,sentiment,points,region,province,winery,title))
+
+caret.data$points_bin = as.factor(caret.data$points_bin)
+
+train_index = createDataPartition(caret.data$points_bin, p=.75, list=FALSE)
+train_data = caret.data[train_index,]
+test_data = caret.data[-train_index,]
+
+tunegrid = expand.grid(mtry= seq(c(3,5)))
+
+trcontrol = trainControl(method = "repeatedcv", number = 5, repeats = 10)
+
+set.seed(123)
+train.rf = train(points_bin~.,
+                 data = train_data,
+                 method = "rf",
+                 tunegrid = tunegrid,
+                 trControl = trcontrol,
+                 ntree = 250)
+
+prediction = predict(train.rf, test_data)
+confusionMatrix(prediction, test_data$points_bin)
+```
+
+
+
+
