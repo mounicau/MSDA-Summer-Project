@@ -1,4 +1,4 @@
-# DA6813 - Team 11 - Final Project GitHub
+# Wine Text Analytics (DA6813 - Team 11 - Final Project GitHub)
 Problem/Scenario:
 
 We are trying to predict how well a wine is rated based on features extracted from the Kaggle Wine Dataset. This is an exercise in exploring text analytics, data cleaning/preprocessing, modeling, and interpretation.
